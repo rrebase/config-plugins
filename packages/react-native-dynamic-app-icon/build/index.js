@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ICON_CONTENTS = void 0;
 const image_utils_1 = require("@expo/image-utils");
 const config_plugins_1 = require("expo/config-plugins");
 const fs_1 = __importDefault(require("fs"));
@@ -10,8 +11,76 @@ const path_1 = __importDefault(require("path"));
 // @ts-ignore
 const pbxFile_1 = __importDefault(require("xcode/lib/pbxFile"));
 const folderName = "DynamicAppIcons";
-const size = 60;
-const scales = [2, 3];
+// Hard-coding seemed like the clearest and safest way to implement the sizes.
+exports.ICON_CONTENTS = [
+    {
+        idiom: "iphone",
+        sizes: [
+            {
+                size: 20,
+                scales: [2, 3],
+            },
+            {
+                size: 29,
+                scales: [1, 2, 3],
+            },
+            {
+                size: 40,
+                scales: [2, 3],
+            },
+            {
+                size: 60,
+                scales: [2, 3],
+            },
+        ],
+    },
+    {
+        idiom: "ipad",
+        sizes: [
+            {
+                size: 20,
+                scales: [1, 2],
+            },
+            {
+                size: 29,
+                scales: [1, 2],
+            },
+            {
+                size: 40,
+                scales: [1, 2],
+            },
+            {
+                size: 76,
+                scales: [1, 2],
+            },
+            {
+                size: 83.5,
+                scales: [2],
+            },
+        ],
+    },
+    {
+        idiom: "ios-marketing",
+        sizes: [
+            {
+                size: 1024,
+                scales: [1],
+            },
+        ],
+    },
+];
+const getAllSizes = () => {
+    const sizes = [];
+    for (const iconContent of exports.ICON_CONTENTS) {
+        if (iconContent.idiom === "ios-marketing") {
+            continue;
+        }
+        for (const sizeSet of iconContent.sizes) {
+            sizes.push(sizeSet.size);
+        }
+    }
+    return sizes;
+};
 function arrayToImages(images) {
     return images.reduce((prev, curr, i) => ({ ...prev, [i]: { image: curr } }), {});
 }
@@ -72,20 +141,25 @@ const withIconXcodeProject = (config, { icons }) => {
         }
         // Link new assets
         await iterateIconsAsync({ icons }, async (key, icon, index) => {
-            for (const scale of scales) {
-                const iconFileName = getIconName(key, size, scale);
-                if (!group?.children.some(({ comment }) => comment === iconFileName)) {
-                    // Only write the file if it doesn't already exist.
-                    config.modResults = config_plugins_1.IOSConfig.XcodeUtils.addResourceFileToGroup({
-                        filepath: path_1.default.join(groupPath, iconFileName),
-                        groupName: groupPath,
-                        project: config.modResults,
-                        isBuildFile: true,
-                        verbose: true,
-                    });
-                }
-                else {
-                    console.log("Skipping duplicate: ", iconFileName);
+            for (const iconContent of exports.ICON_CONTENTS) {
+                for (const sizeSet of iconContent.sizes) {
+                    for (const scale of sizeSet.scales) {
+                        const iconFileName = getIconName(key, sizeSet.size, scale);
+                        if (!group?.children.some(({ comment }) => comment === iconFileName)) {
+                            // Only write the file if it doesn't already exist.
+                            config.modResults = config_plugins_1.IOSConfig.XcodeUtils.addResourceFileToGroup({
+                                filepath: path_1.default.join(groupPath, iconFileName),
+                                groupName: groupPath,
+                                project: config.modResults,
+                                isBuildFile: true,
+                                verbose: true,
+                            });
+                        }
+                        else {
+                            // Duplicates are expected as we don't use grouping by idiom atm
+                            // console.log("Skipping duplicate: ", iconFileName);
+                        }
+                    }
                 }
             }
         });
@@ -98,9 +172,10 @@ const withIconInfoPlist = (config, { icons }) => {
         await iterateIconsAsync({ icons }, async (key, icon) => {
             altIcons[key] = {
                 CFBundleIconFiles: [
+                    ...getAllSizes().map((size) => getIconName(key, size)),
                     // Must be a file path relative to the source root (not a icon set it seems).
                     // i.e. `Bacon-Icon-60x60` when the image is `ios/somn/appIcons/Bacon-Icon-60x60@2x.png`
-                    getIconName(key, size),
+                    // getIconName(key, size),
                 ],
                 UIPrerenderedIcon: !!icon.prerendered,
             };
@@ -143,24 +218,28 @@ async function createIconsAsync(config, { icons }) {
     await fs_1.default.promises.mkdir(path_1.default.join(iosRoot, folderName), { recursive: true });
     // Generate new assets
     await iterateIconsAsync({ icons }, async (key, icon) => {
-        for (const scale of scales) {
-            const iconFileName = getIconName(key, size, scale);
-            const fileName = path_1.default.join(folderName, iconFileName);
-            const outputPath = path_1.default.join(iosRoot, fileName);
-            const scaledSize = scale * size;
-            const { source } = await (0, image_utils_1.generateImageAsync)({
-                projectRoot: config.modRequest.projectRoot,
-                cacheType: "react-native-dynamic-app-icon",
-            }, {
-                name: iconFileName,
-                src: icon.image,
-                removeTransparency: true,
-                backgroundColor: "#ffffff",
-                resizeMode: "cover",
-                width: scaledSize,
-                height: scaledSize,
-            });
-            await fs_1.default.promises.writeFile(outputPath, source);
+        for (const iconContent of exports.ICON_CONTENTS) {
+            for (const sizeSet of iconContent.sizes) {
+                for (const scale of sizeSet.scales) {
+                    const iconFileName = getIconName(key, sizeSet.size, scale);
+                    const fileName = path_1.default.join(folderName, iconFileName);
+                    const outputPath = path_1.default.join(iosRoot, fileName);
+                    const scaledSize = scale * sizeSet.size;
+                    const { source } = await (0, image_utils_1.generateImageAsync)({
+                        projectRoot: config.modRequest.projectRoot,
+                        cacheType: "react-native-dynamic-app-icon",
+                    }, {
+                        name: iconFileName,
+                        src: icon.image,
+                        removeTransparency: true,
+                        backgroundColor: "#ffffff",
+                        resizeMode: "cover",
+                        width: scaledSize,
+                        height: scaledSize,
+                    });
+                    await fs_1.default.promises.writeFile(outputPath, source);
+                }
+            }
         }
     });
 }
